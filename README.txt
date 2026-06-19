@@ -1,11 +1,6 @@
-GRADING TENERA - FIREBASE FIXX
+Sistem Grading TBS dan Tenera Dura - Firebase Fixx Realtime Checked
 
-Isi utama:
-- index.html
-- styles.css
-- app.js
-
-Firebase project aktif:
+Project Firebase:
 - projectId: grading-fixx
 - authDomain: grading-fixx.firebaseapp.com
 
@@ -13,17 +8,16 @@ Login aplikasi:
 - Operator: 123456
 - Staff: 456789
 
-Catatan wajib realtime:
-1. Aktifkan Authentication > Sign-in method > Anonymous.
-2. Firestore Database harus aktif.
-3. Publish rules dari FIREBASE_RULES.txt.
-4. Deploy ke Firebase Hosting atau jalankan via localhost.
-5. Semua HP harus membuka URL hosting yang sama.
+Catatan penting:
+1. Deploy folder ini ke Firebase Hosting atau jalankan melalui localhost.
+2. Jangan dibuka langsung via file:// untuk pemakaian realtime antar HP.
+3. Authentication > Sign-in method > Anonymous harus Enabled.
+4. Firestore Rules gunakan isi FIREBASE_RULES.txt lalu Publish.
+5. Database yang dipakai adalah Cloud Firestore, bukan Realtime Database.
+6. Collection yang otomatis dipakai/dibuat: gradingTransactions, teneraDuraTransactions, suppliers, drivers, settings, auditLogs.
 
-Collection yang dipakai:
-- gradingTransactions
-- teneraDuraTransactions
-- suppliers
-- drivers
-- auditLogs
-- settings/app
+Cara cek realtime:
+- Buka link hosting yang sama di dua HP.
+- Login di kedua HP.
+- Input data di HP pertama.
+- Di HP kedua buka Data Transaksi tanpa refresh. Data harus muncul otomatis.

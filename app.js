@@ -350,7 +350,6 @@
       updateAuthVisibility();
       renderAll();
       await migrateLocalDataToFirestoreOnce();
-      await fullCloudSync();
 
       sessionStorage.removeItem(PENDING_LOCAL_SYNC_KEY);
 
@@ -619,6 +618,18 @@
     } catch (error) {
       console.warn("Gagal menghapus dokumen Firestore:", key, id, error);
       toast("Data lokal terhapus, tetapi sinkron hapus belum berhasil. Cek koneksi.", true);
+    }
+  }
+
+  async function ensureRealtimeWriteReady() {
+    if (firebaseState.ready && firebaseState.db) return true;
+    try {
+      await signInFirebaseAndStartRealtime(false);
+      return !!(firebaseState.ready && firebaseState.db);
+    } catch (error) {
+      console.error("Firebase realtime belum siap untuk menulis:", error);
+      toast("Firebase realtime belum tersambung. Data belum dikirim ke database.", true);
+      return false;
     }
   }
 
@@ -921,9 +932,9 @@
       applyDriverAutofill(gradingForm);
       calculateGradingPreview();
     });
-    gradingForm.addEventListener("submit", async (event) => {
+    gradingForm.addEventListener("submit", (event) => {
       event.preventDefault();
-      await saveGradingFromForm(false);
+      saveGradingFromForm(false);
     });
     gradingForm.addEventListener("reset", () => {
       setTimeout(() => {
@@ -940,9 +951,9 @@
       applyDriverAutofill(tdForm);
       calculateTdPreview();
     });
-    tdForm.addEventListener("submit", async (event) => {
+    tdForm.addEventListener("submit", (event) => {
       event.preventDefault();
-      await saveTdFromForm(false);
+      saveTdFromForm(false);
     });
     tdForm.addEventListener("reset", () => {
       setTimeout(() => {
@@ -955,8 +966,8 @@
   function setupButtons() {
     byId("firebaseReconnectButton")?.addEventListener("click", () => runFirebaseDiagnostic(true));
     byId("firebaseDiagnosticButton")?.addEventListener("click", () => runFirebaseDiagnostic(true));
-    byId("saveGradingReportButton").addEventListener("click", async () => await saveGradingFromForm(true));
-    byId("saveTdReportButton").addEventListener("click", async () => await saveTdFromForm(true));
+    byId("saveGradingReportButton").addEventListener("click", () => saveGradingFromForm(true));
+    byId("saveTdReportButton").addEventListener("click", () => saveTdFromForm(true));
 
     byId("refreshDashboardButton").addEventListener("click", renderDashboard);
     byId("applyDataFilterButton").addEventListener("click", renderDataTables);
@@ -1288,6 +1299,8 @@
       return null;
     }
 
+    if (!(await ensureRealtimeWriteReady())) return null;
+
     const record = {
       id: nextTransactionId("GRD", getText(form, "date")),
       date: getText(form, "date"),
@@ -1309,12 +1322,13 @@
     state.grading.push(record);
     upsertDriver(record.driver, record.plate, record.supplier);
     addAuditLog("grading", record.id, "tambah", null, record);
+    const auditLog = state.auditLogs[state.auditLogs.length - 1];
     saveAllLocalOnly();
-    const gradingSynced = await setFirestoreDoc("grading", record);
+    const savedToFirebase = await setFirestoreDoc("grading", record);
     await setFirestoreDoc("drivers", state.drivers.find((item) => item.name.toLowerCase() === record.driver.toLowerCase()));
-    if (!gradingSynced) {
-      toast("Data belum berhasil masuk Firebase. Cek koneksi/rules lalu coba lagi.", true);
-      queueCloudSync();
+    await setFirestoreDoc("auditLogs", auditLog);
+    if (!savedToFirebase) {
+      toast("Data tersimpan lokal, tetapi belum masuk Firebase. Cek koneksi/rules.", true);
     }
     form.reset();
     form.elements.date.value = todayString();
@@ -1335,6 +1349,8 @@
       toast(validation.message, true);
       return null;
     }
+
+    if (!(await ensureRealtimeWriteReady())) return null;
 
     const record = {
       id: nextTransactionId("TD", getText(form, "date")),
@@ -1357,12 +1373,13 @@
     state.td.push(record);
     upsertDriver(record.driver, record.plate, record.supplier);
     addAuditLog("td", record.id, "tambah", null, record);
+    const auditLog = state.auditLogs[state.auditLogs.length - 1];
     saveAllLocalOnly();
-    const tdSynced = await setFirestoreDoc("td", record);
+    const savedToFirebase = await setFirestoreDoc("td", record);
     await setFirestoreDoc("drivers", state.drivers.find((item) => item.name.toLowerCase() === record.driver.toLowerCase()));
-    if (!tdSynced) {
-      toast("Data belum berhasil masuk Firebase. Cek koneksi/rules lalu coba lagi.", true);
-      queueCloudSync();
+    await setFirestoreDoc("auditLogs", auditLog);
+    if (!savedToFirebase) {
+      toast("Data tersimpan lokal, tetapi belum masuk Firebase. Cek koneksi/rules.", true);
     }
     form.reset();
     form.elements.date.value = todayString();
@@ -2340,7 +2357,7 @@ File JPG: ${fileName}`;
     openModal("Edit Tenera Dura", html, `<button class="btn btn-outline" data-close-modal>Batal</button><button class="btn btn-primary" data-action="save-edit-td" data-id="${row.id}">Simpan Perubahan</button>`);
   }
 
-  function saveEditedGrading(id) {
+  async function saveEditedGrading(id) {
     if (!requireStaffAction()) return;
     const form = byId("editGradingForm");
     if (!form) return;
@@ -2353,6 +2370,10 @@ File JPG: ${fileName}`;
       toast(validation.message, true);
       return;
     }
+    if (!(await ensureRealtimeWriteReady())) return;
+
+    if (!(await ensureRealtimeWriteReady())) return;
+
     const updated = {
       ...old,
       date: getText(form, "date"),
@@ -2371,15 +2392,18 @@ File JPG: ${fileName}`;
     state.grading[index] = updated;
     upsertDriver(updated.driver, updated.plate, updated.supplier);
     addAuditLog("grading", id, "edit", old, updated);
-    saveAll();
-    setFirestoreDoc("grading", updated);
-    setFirestoreDoc("drivers", state.drivers.find((item) => item.name.toLowerCase() === updated.driver.toLowerCase()));
+    const auditLog = state.auditLogs[state.auditLogs.length - 1];
+    saveAllLocalOnly();
+    const savedToFirebase = await setFirestoreDoc("grading", updated);
+    await setFirestoreDoc("drivers", state.drivers.find((item) => item.name.toLowerCase() === updated.driver.toLowerCase()));
+    await setFirestoreDoc("auditLogs", auditLog);
+    if (!savedToFirebase) toast("Perubahan lokal tersimpan, tetapi belum masuk Firebase.", true);
     closeModal();
     renderAll();
     toast("Data grading berhasil diperbarui.");
   }
 
-  function saveEditedTd(id) {
+  async function saveEditedTd(id) {
     if (!requireStaffAction()) return;
     const form = byId("editTdForm");
     if (!form) return;
@@ -2409,9 +2433,12 @@ File JPG: ${fileName}`;
     state.td[index] = updated;
     upsertDriver(updated.driver, updated.plate, updated.supplier);
     addAuditLog("td", id, "edit", old, updated);
-    saveAll();
-    setFirestoreDoc("td", updated);
-    setFirestoreDoc("drivers", state.drivers.find((item) => item.name.toLowerCase() === updated.driver.toLowerCase()));
+    const auditLog = state.auditLogs[state.auditLogs.length - 1];
+    saveAllLocalOnly();
+    const savedToFirebase = await setFirestoreDoc("td", updated);
+    await setFirestoreDoc("drivers", state.drivers.find((item) => item.name.toLowerCase() === updated.driver.toLowerCase()));
+    await setFirestoreDoc("auditLogs", auditLog);
+    if (!savedToFirebase) toast("Perubahan lokal tersimpan, tetapi belum masuk Firebase.", true);
     closeModal();
     renderAll();
     toast("Data tenera dura berhasil diperbarui.");
@@ -2427,20 +2454,23 @@ File JPG: ${fileName}`;
     openModal(`Hapus ${label}`, `<p>Hapus data <strong>${escapeHtml(record.id)}</strong>?</p><p class="muted">Data yang dihapus akan dicatat di audit log.</p>`, `<button class="btn btn-outline" data-close-modal>Batal</button><button class="btn btn-danger" data-action="${action}" data-id="${id}">Hapus</button>`);
   }
 
-  function deleteRecord(type, id) {
+  async function deleteRecord(type, id) {
     if (!requireStaffAction()) return;
+    if (!(await ensureRealtimeWriteReady())) return;
     if (type === "grading") {
       const old = state.grading.find((item) => item.id === id);
       state.grading = state.grading.filter((item) => item.id !== id);
       addAuditLog("grading", id, "hapus", old, null);
-      deleteFirestoreDoc("grading", id);
+      await deleteFirestoreDoc("grading", id);
     } else {
       const old = state.td.find((item) => item.id === id);
       state.td = state.td.filter((item) => item.id !== id);
       addAuditLog("td", id, "hapus", old, null);
-      deleteFirestoreDoc("td", id);
+      await deleteFirestoreDoc("td", id);
     }
-    saveAll();
+    const auditLog = state.auditLogs[state.auditLogs.length - 1];
+    saveAllLocalOnly();
+    await setFirestoreDoc("auditLogs", auditLog);
     closeModal();
     renderAll();
     toast("Data berhasil dihapus.");
